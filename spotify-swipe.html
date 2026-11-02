@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Разбор Liked Songs</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,700;12..96,800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#1a1325; --panel:#261c36; --line:#3a2d50; --text:#f4f0fa; --muted:#a79bbd;
+  --yes:#6df0ae; --no:#ff6f7d; --accent:#6df0ae;
+  --font:'Bricolage Grotesque',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;height:100dvh;overscroll-behavior:none}
+body{font-family:var(--font);background:var(--bg);color:var(--text);overflow:hidden;
+  padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+#ambient{position:fixed;inset:-10%;background-size:cover;background-position:center;filter:blur(70px) saturate(1.4);
+  opacity:.45;transition:background-image .6s, opacity .6s;z-index:0}
+.screen{position:relative;z-index:1;height:100%;display:none;flex-direction:column;align-items:center;padding:20px;overflow:auto}
+.screen.active{display:flex}
+h1{font-size:clamp(30px,6vw,46px);font-weight:800;letter-spacing:-.02em;line-height:1.05;margin-bottom:12px}
+p.lead{color:var(--muted);max-width:46ch;line-height:1.5;margin-bottom:22px}
+.box{width:100%;max-width:520px;margin:auto}
+label{display:block;font-size:14px;color:var(--muted);margin-bottom:6px}
+input[type=text]{width:100%;padding:13px 14px;border-radius:12px;border:1px solid var(--line);background:var(--panel);color:var(--text);font:inherit;margin-bottom:14px}
+input:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+code{display:block;word-break:break-all;background:var(--panel);border:1px solid var(--line);padding:10px 12px;border-radius:10px;font-size:13px;margin-bottom:6px}
+.btn{font:inherit;font-weight:700;border:0;border-radius:999px;padding:14px 26px;cursor:pointer;background:var(--accent);color:#0f2a1c}
+.btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line);padding:9px 16px;font-weight:500;font-size:14px}
+.btn:disabled{opacity:.5;cursor:default}
+small{color:var(--muted);line-height:1.5;display:block}
+.pl{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:8px;border-radius:14px;border:1px solid transparent;background:var(--panel);color:var(--text);font:inherit;cursor:pointer;margin-bottom:8px}
+.pl:hover,.pl.sel{border-color:var(--accent)}
+.pl img,.pl .ph{width:48px;height:48px;border-radius:8px;object-fit:cover;background:var(--line);flex:none}
+.pl b{display:block;font-weight:700}
+.pl span{font-size:13px;color:var(--muted)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.newpl{display:flex;gap:8px;margin:14px 0}
+.newpl input{margin:0}
+
+/* deck */
+#deck-screen{padding:12px 16px 16px;justify-content:space-between;overflow:hidden}
+.top{width:100%;max-width:520px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.top .info{min-width:0}
+.top .info b{display:block;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top .info span{font-size:13px;color:var(--muted)}
+.stage{position:relative;width:min(88vw,400px);aspect-ratio:3/4.3;max-height:62vh;margin:8px 0;touch-action:none}
+.card{position:absolute;inset:0;border-radius:22px;overflow:hidden;background:var(--panel);
+  box-shadow:0 18px 40px rgba(0,0,0,.45);user-select:none;-webkit-user-select:none;will-change:transform;
+  display:flex;flex-direction:column;transform-origin:50% 100%}
+.card.top-card{cursor:grab}
+.card .art{flex:1;min-height:0;background:#000 center/cover no-repeat;pointer-events:none}
+.card .meta{padding:14px 18px 18px;background:linear-gradient(#261c36,#1d1529);pointer-events:none}
+.card .t{font-size:22px;font-weight:800;letter-spacing:-.01em;line-height:1.15;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card .a{color:var(--muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stamp{position:absolute;top:22px;padding:6px 14px;border:3px solid;border-radius:10px;font-weight:800;font-size:22px;opacity:0;pointer-events:none}
+.stamp.yes{left:18px;color:var(--yes);border-color:var(--yes);transform:rotate(-12deg)}
+.stamp.no{right:18px;color:var(--no);border-color:var(--no);transform:rotate(12deg)}
+.snip{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,.12)}
+.snip i{display:block;height:100%;width:0;background:var(--accent)}
+@keyframes fill{from{width:0}to{width:100%}}
+.controls{display:flex;gap:18px;align-items:center;justify-content:center}
+.rb{width:64px;height:64px;border-radius:50%;border:2px solid;background:rgba(0,0,0,.25);font-size:26px;cursor:pointer;color:inherit;display:grid;place-items:center}
+.rb.no{color:var(--no);border-color:var(--no)}
+.rb.yes{color:var(--yes);border-color:var(--yes)}
+.rb.sm{width:46px;height:46px;font-size:18px;color:var(--muted);border-color:var(--line)}
+.rb:active{transform:scale(.94)}
+.hint{font-size:12px;color:var(--muted);text-align:center}
+.empty{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:20px;color:var(--muted)}
+.empty h2{color:var(--text);font-size:26px;margin-bottom:8px}
+#toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(30px);
+  background:#fff;color:#1a1325;padding:10px 16px;border-radius:12px;font-size:14px;opacity:0;transition:.25s;z-index:10;max-width:90vw;pointer-events:none}
+#toast.show{opacity:1;transform:translateX(-50%)}
+.progress{width:100%;height:6px;background:var(--panel);border-radius:3px;overflow:hidden;margin:14px 0 6px}
+.progress i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
+#dev-ov{position:fixed;inset:0;z-index:20;background:rgba(10,6,16,.82);display:none;align-items:flex-end;justify-content:center}
+#dev-ov .sheet{width:100%;max-width:520px;background:var(--bg);border:1px solid var(--line);border-radius:22px 22px 0 0;padding:22px 18px calc(22px + env(safe-area-inset-bottom));max-height:80vh;overflow:auto}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div id="ambient"></div>
+
+<!-- 1. Настройка и вход -->
+<section class="screen" id="login-screen">
+  <div class="box">
+    <h1>Разбери свои Liked Songs</h1>
+    <p class="lead">Свайп вправо — трек уходит в выбранный плейлист. Свайп влево — трек просто пропадает из этой стопки. В Liked Songs ничего не удаляется.</p>
+    <label for="cid">Client ID вашего приложения Spotify</label>
+    <input type="text" id="cid" placeholder="например, 3f2a…" autocomplete="off" spellcheck="false">
+    <label>Redirect URI — добавьте его в настройках приложения на developer.spotify.com</label>
+    <code id="redir"></code>
+    <small style="margin-bottom:18px">Вход идёт по OAuth PKCE: секретного ключа нет, пароль Spotify до этой страницы не доходит.</small>
+    <button class="btn" id="login-btn">Войти через Spotify</button>
+  </div>
+</section>
+
+<!-- 2. Выбор плейлиста -->
+<section class="screen" id="pick-screen">
+  <div class="box">
+    <h1>Куда складывать?</h1>
+    <p class="lead">Выберите плейлист из вашей библиотеки или создайте новый.</p>
+    <div id="pl-list"></div>
+    <div class="newpl">
+      <input type="text" id="newname" placeholder="Название нового плейлиста">
+      <button class="btn ghost" id="newbtn">Создать</button>
+    </div>
+    <div id="load-wrap" style="display:none">
+      <small id="load-text">Загружаю Liked Songs…</small>
+      <div class="progress"><i id="load-bar"></i></div>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button class="btn" id="start-btn" disabled>Начать</button>
+      <label style="margin:0;display:flex;gap:6px;align-items:center"><input type="checkbox" id="shuffle" checked> Перемешать</label>
+      <button class="btn ghost" id="logout1">Выйти</button>
+    </div>
+  </div>
+</section>
+
+<!-- 3. Стопка -->
+<section class="screen" id="deck-screen">
+  <div class="top">
+    <div class="info"><b id="pl-name"></b><span id="left-count"></span></div>
+    <div class="row">
+      <button class="btn ghost" id="dev-btn" title="Устройство воспроизведения" style="display:none">📱</button>
+      <button class="btn ghost" id="mute-btn" title="Звук">🔊</button>
+      <button class="btn ghost" id="change-pl">Плейлист</button>
+    </div>
+  </div>
+  <div class="stage" id="stage"></div>
+  <div>
+    <div class="controls">
+      <button class="rb no" id="b-no" aria-label="Пропустить">✕</button>
+      <button class="rb sm" id="b-undo" aria-label="Отменить">↶</button>
+      <button class="rb yes" id="b-yes" aria-label="В плейлист">♥</button>
+    </div>
+    <p class="hint" id="status" style="margin-top:10px;cursor:pointer" title="Нажмите, чтобы запустить заново"></p>
+    <p class="hint" style="margin-top:6px">← убрать из стопки · в плейлист → · клавиши ← → и Backspace</p>
+  </div>
+</section>
+
+<div id="dev-ov"><div class="sheet">
+  <h1 style="font-size:26px">Где играть?</h1>
+  <p class="lead" id="dev-hint"></p>
+  <div id="dev-list"></div>
+  <div class="row" style="margin-top:10px"><button class="btn ghost" id="dev-refresh">Обновить список</button><button class="btn ghost" id="dev-close">Закрыть</button></div>
+</div></div>
+<div id="toast"></div>
+
+<script>
+'use strict';
+/* ================= Настройки ================= */
+const SCOPES = [
+  'user-library-read','playlist-read-private','playlist-read-collaborative',
+  'playlist-modify-private','playlist-modify-public',
+  'streaming','user-read-email','user-read-private',
+  'user-read-playback-state','user-modify-playback-state'
+].join(' ');
+const SNIPPET_MS = 25000;       // длина фрагмента
+const CHORUS_AT = 0.38;         // «припев» ≈ 38% длины трека (эвристика)
+const API = 'https://api.spotify.com/v1';
+const REDIRECT = location.origin + location.pathname;
+
+/* ================= Утилиты ================= */
+const $ = id => document.getElementById(id);
+const LS = {
+  get(k, d){ try{ const v = localStorage.getItem(k); return v===null? d : JSON.parse(v);}catch{return d;} },
+  set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch{} },
+  del(k){ try{ localStorage.removeItem(k); }catch{} }
+};
+function show(id){ document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active', s.id===id)); }
+let toastT;
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),3200); }
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+function shuffleArr(a){ for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; }
+
+/* ================= Авторизация (PKCE) ================= */
+function rand(len){ const a=new Uint8Array(len); crypto.getRandomValues(a); return Array.from(a,b=>('0'+b.toString(16)).slice(-2)).join('').slice(0,len); }
+async function sha256b64url(s){
+  const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+  return btoa(String.fromCharCode(...new Uint8Array(d))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+async function login(){
+  const cid = $('cid').value.trim();
+  if(!cid){ toast('Введите Client ID'); return; }
+  if(!crypto.subtle){ toast('Нужен безопасный контекст: https или http://127.0.0.1'); return; }
+  LS.set('ss_cid', cid);
+  const verifier = rand(96), state = rand(24);
+  sessionStorage.setItem('ss_verifier', verifier);
+  sessionStorage.setItem('ss_state', state);
+  const p = new URLSearchParams({
+    client_id: cid, response_type:'code', redirect_uri: REDIRECT, scope: SCOPES,
+    state, code_challenge_method:'S256', code_challenge: await sha256b64url(verifier)
+  });
+  location.href = 'https://accounts.spotify.com/authorize?' + p;
+}
+async function tokenRequest(body){
+  const r = await fetch('https://accounts.spotify.com/api/token', {
+    method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:new URLSearchParams(body)
+  });
+  if(!r.ok) throw new Error('token ' + r.status);
+  const j = await r.json();
+  const prev = LS.get('ss_tokens', {});
+  LS.set('ss_tokens', { access:j.access_token, refresh:j.refresh_token || prev.refresh, exp:Date.now()+j.expires_in*1000 });
+}
+async function handleRedirect(){
+  const q = new URLSearchParams(location.search);
+  if(!q.has('code') && !q.has('error')) return false;
+  const code=q.get('code'), state=q.get('state'), err=q.get('error');
+  history.replaceState({}, '', REDIRECT);
+  if(err){ toast('Spotify отклонил вход: '+err); return false; }
+  if(state !== sessionStorage.getItem('ss_state')){ toast('Ошибка проверки state. Попробуйте войти ещё раз.'); return false; }
+  await tokenRequest({ client_id:LS.get('ss_cid'), grant_type:'authorization_code', code, redirect_uri:REDIRECT,
+    code_verifier: sessionStorage.getItem('ss_verifier') });
+  sessionStorage.removeItem('ss_verifier'); sessionStorage.removeItem('ss_state');
+  return true;
+}
+async function getToken(){
+  const t = LS.get('ss_tokens');
+  if(!t) throw new Error('no-auth');
+  if(Date.now() > t.exp - 60000){
+    if(!t.refresh) throw new Error('no-auth');
+    await tokenRequest({ client_id:LS.get('ss_cid'), grant_type:'refresh_token', refresh_token:t.refresh });
+  }
+  return LS.get('ss_tokens').access;
+}
+function logout(){ LS.del('ss_tokens'); stopPlayback(); location.href = REDIRECT; }
+
+/* ================= API ================= */
+async function api(path, opt={}, retry=0){
+  const token = await getToken();
+  const r = await fetch(path.startsWith('http')? path : API+path, {
+    method: opt.method||'GET',
+    headers:{ Authorization:'Bearer '+token, ...(opt.body?{'Content-Type':'application/json'}:{}) },
+    body: opt.body ? JSON.stringify(opt.body) : undefined
+  });
+  if(r.status===429 && retry<4){ await sleep((+r.headers.get('Retry-After')||2)*1000+200); return api(path,opt,retry+1); }
+  if(r.status===204) return null;
+  const txt = await r.text();
+  let j=null; try{ j = txt? JSON.parse(txt):null; }catch{}
+  if(!r.ok){ const e = new Error((j&&j.error&&(j.error.message||j.error))||('HTTP '+r.status)); e.status=r.status; throw e; }
+  return j;
+}
+async function fetchAll(firstUrl, onPage){
+  let url = firstUrl, out=[];
+  while(url){ const j = await api(url); out = out.concat(j.items||[]); onPage&&onPage(out.length, j.total); url = j.next; }
+  return out;
+}
+
+/* ================= Данные ================= */
+let me, playlists=[], target=null, liked=[], queue=[], history_=[];
+let dismissed = new Set(LS.get('ss_dismissed', []));
+const addedKey = id => 'ss_added_'+id;
+
+function trackFrom(it){
+  const t = it && (it.track || it.item || it);
+  if(!t || !t.uri || t.is_local || (t.type && t.type!=='track')) return null;
+  return t;
+}
+
+async function loadPlaylists(){
+  const all = await fetchAll('/me/playlists?limit=50');
+  playlists = all.filter(p => p && (p.owner?.id===me.id || p.collaborative));
+  const list = $('pl-list'); list.innerHTML='';
+  playlists.forEach(p=>{
+    const b = document.createElement('button'); b.className='pl'; b.dataset.id=p.id;
+    const img = p.images && p.images.length ? Object.assign(document.createElement('img'),{src:p.images[p.images.length-1].url,alt:''}) : Object.assign(document.createElement('div'),{className:'ph'});
+    const d = document.createElement('div');
+    const n = document.createElement('b'); n.textContent = p.name;
+    const c = document.createElement('span'); c.textContent = p.collaborative? 'совместный' : 'ваш плейлист';
+    d.append(n,c); b.append(img,d);
+    b.onclick = ()=>selectPlaylist(p);
+    list.append(b);
+  });
+  if(!playlists.length) list.innerHTML = '<small>Плейлистов пока нет — создайте новый ниже.</small>';
+}
+function selectPlaylist(p){
+  target = p; LS.set('ss_target', p.id);
+  document.querySelectorAll('.pl').forEach(el=>el.classList.toggle('sel', el.dataset.id===p.id));
+  $('start-btn').disabled = !liked.length;
+}
+async function createPlaylist(){
+  const name = $('newname').value.trim();
+  if(!name){ toast('Введите название'); return; }
+  try{
+    const p = await api('/me/playlists', {method:'POST', body:{name, public:false, description:'Собрано в приложении разбора Liked Songs'}});
+    $('newname').value=''; playlists.unshift(p);
+    await loadPlaylists(); if(!playlists.find(x=>x.id===p.id)) playlists.unshift(p);
+    selectPlaylist(p); toast('Плейлист создан');
+  }catch(e){ toast('Не удалось создать плейлист: '+e.message); }
+}
+async function loadLiked(){
+  $('load-wrap').style.display='block';
+  const items = await fetchAll('/me/tracks?limit=50', (n,total)=>{
+    $('load-text').textContent = `Загружаю Liked Songs: ${n} из ${total||'?'}`;
+    $('load-bar').style.width = total? (n/total*100)+'%' : '50%';
+  });
+  liked = items.map(trackFrom).filter(Boolean);
+  $('load-text').textContent = `Liked Songs загружены: ${liked.length}`;
+  setTimeout(()=>$('load-wrap').style.display='none', 1200);
+  $('start-btn').disabled = !target;
+}
+async function buildQueue(){
+  // что уже лежит в плейлисте — в стопку не попадает
+  let inPl = new Set(LS.get(addedKey(target.id), []));
+  try{
+    const items = await fetchAll(`/playlists/${target.id}/items?limit=50`);
+    items.forEach(i=>{ const t=trackFrom(i); if(t) inPl.add(t.uri); });
+  }catch(e){ /* если нет доступа — полагаемся на локальную память */ }
+  queue = liked.filter(t => !dismissed.has(t.uri) && !inPl.has(t.uri));
+  if($('shuffle').checked) shuffleArr(queue);
+  history_ = [];
+}
+
+/* ================= Воспроизведение ================= */
+const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+let connectMode = IOS;   // iOS: SDK не работает, управляем приложением Spotify через Connect
+let player=null, deviceId=null, playToken=0, snipTimer, debTimer, muted=false, sdkFailed=false;
+async function loadDevices(){
+  const j = await api('/me/player/devices');
+  return ((j && j.devices) || []).filter(d=>!d.is_restricted);
+}
+function setDevice(d){
+  deviceId = d.id; LS.set('ss_device_name', d.name);
+  closeDevices(); toast('Играет на: '+d.name); schedulePlay();
+}
+function closeDevices(){ $('dev-ov').style.display='none'; }
+function openDevices(devs){
+  const list = $('dev-list'); list.innerHTML='';
+  $('dev-hint').textContent = devs.length
+    ? 'Выберите устройство, на котором будут играть фрагменты.'
+    : 'Устройств не видно. Откройте приложение Spotify, запустите любой трек, вернитесь в Safari и нажмите «Обновить список».';
+  devs.forEach(d=>{
+    const b = document.createElement('button'); b.className='pl';
+    const dv = document.createElement('div'); const n=document.createElement('b'); n.textContent=d.name;
+    const t=document.createElement('span'); t.textContent=d.type+(d.is_active?' · сейчас активно':''); dv.append(n,t);
+    b.append(dv); b.onclick=()=>setDevice(d); list.append(b);
+  });
+  $('dev-ov').style.display='flex';
+}
+async function pickDevice(auto){
+  let devs=[];
+  try{ devs = await loadDevices(); }catch(e){ toast('Не удалось получить устройства: '+e.message); }
+  if(auto){
+    const saved = LS.get('ss_device_name');
+    const d = devs.find(x=>x.is_active) || devs.find(x=>x.name===saved) || (devs.length===1? devs[0] : null);
+    if(d){ setDevice(d); return; }
+  }
+  openDevices(devs);
+}
+function initPlayer(){
+  if(connectMode){ $('dev-btn').style.display=''; pickDevice(true); return; }
+  if(player || sdkFailed) { player && player.activateElement && player.activateElement(); return; }
+  window.onSpotifyWebPlaybackSDKReady = () => {
+    player = new Spotify.Player({ name:'Разбор Liked Songs', getOAuthToken: cb=>getToken().then(cb), volume:.8 });
+    player.addListener('ready', async ({device_id})=>{
+      deviceId = device_id;
+      try{ await api('/me/player', {method:'PUT', body:{device_ids:[deviceId], play:false}}); }catch{}
+      schedulePlay();
+    });
+    player.addListener('not_ready', ()=>{ deviceId=null; });
+    player.addListener('account_error', ()=>{ sdkFailed=true; toast('Для воспроизведения в браузере нужен Spotify Premium'); });
+    player.addListener('authentication_error', ()=>toast('Ошибка авторизации плеера — войдите заново'));
+    player.addListener('initialization_error', ()=>{ sdkFailed=true; connectMode=true; $('dev-btn').style.display=''; toast('Браузер не поддерживает Web Playback — управляю приложением Spotify'); pickDevice(true); });
+    player.addListener('playback_error', e=>console.warn(e));
+    player.connect();
+    player.activateElement && player.activateElement();
+  };
+  const s = document.createElement('script'); s.src='https://sdk.scdn.co/spotify-player.js'; s.async=true;
+  s.onerror = ()=>{ sdkFailed=true; toast('Не удалось загрузить Spotify Web Playback SDK'); };
+  document.body.append(s);
+}
+function chorusStart(dur){ return Math.max(0, Math.round(Math.min(dur*CHORUS_AT, dur-SNIPPET_MS-3000))); }
+function restartBar(){
+  const bar = document.querySelector('.top-card .snip i'); if(!bar) return;
+  bar.style.animation='none'; void bar.offsetWidth; bar.style.animation = `fill ${SNIPPET_MS}ms linear forwards`;
+}
+function schedulePlay(){
+  clearTimeout(debTimer); clearTimeout(snipTimer); playToken++;
+  const t = queue[0];
+  if(!t || !deviceId || muted) return;
+  debTimer = setTimeout(()=>playSnippet(t), 350);
+}
+function setStatus(t){ const el=$('status'); if(el) el.textContent=t; }
+function playBody(t, start){
+  // На мобильных клиентах надёжнее запуск внутри контекста (альбома) со смещением на трек
+  if(connectMode && t.album && t.album.uri) return { context_uri:t.album.uri, offset:{uri:t.uri}, position_ms:start };
+  return { uris:[t.uri], position_ms:start };
+}
+async function playSnippet(t){
+  const my = ++playToken, start = chorusStart(t.duration_ms);
+  setStatus('запускаю…');
+  try{
+    await api('/me/player/play?device_id='+deviceId, {method:'PUT', body:playBody(t,start)});
+  }catch(e){
+    if(my!==playToken) return;
+    if(connectMode && (e.status===404 || e.status===403)){ deviceId=null; setStatus('устройство недоступно'); toast('Устройство недоступно — выберите заново'); pickDevice(false); }
+    else setStatus('Spotify вернул ошибку '+(e.status||'')+': '+e.message);
+    return;
+  }
+  if(my!==playToken) return;
+  restartBar();
+  // Только диагностика: после запуска ничего повторно не отправляем
+  setTimeout(async ()=>{
+    if(my!==playToken) return;
+    try{
+      const st = await api('/me/player');
+      const it = st && (st.item || st.track);
+      if(!st) setStatus('Spotify не видит активного плеера — нажмите сюда');
+      else if(st.is_playing && it && it.uri===t.uri) setStatus('играет на «'+(st.device&&st.device.name)+'»');
+      else setStatus('Spotify: '+(st.is_playing?'играет другой трек':'пауза')+' на «'+(st.device&&st.device.name)+'». Нажмите сюда, чтобы запустить заново');
+    }catch(e){ setStatus('не удалось проверить: '+e.message); }
+  }, 2500);
+  const loop = async ()=>{
+    if(my!==playToken) return;
+    try{ await api('/me/player/play?device_id='+deviceId, {method:'PUT', body:playBody(t,start)}); }catch{}
+    restartBar();
+    snipTimer = setTimeout(loop, SNIPPET_MS);
+  };
+  snipTimer = setTimeout(loop, SNIPPET_MS);
+}
+function cancelTimers(){ clearTimeout(debTimer); clearTimeout(snipTimer); playToken++; }
+function stopPlayback(){
+  cancelTimers();
+  if(player){ try{ player.pause(); }catch{} }
+  else if(connectMode && deviceId){ api('/me/player/pause?device_id='+deviceId, {method:'PUT'}).catch(()=>{}); }
+}
+function toggleMute(){
+  muted = !muted; $('mute-btn').textContent = muted? '🔇':'🔊';
+  if(muted) stopPlayback(); else schedulePlay();
+}
+
+/* ================= Стопка карточек ================= */
+const stage = $('stage');
+let busy=false;
+function makeCard(t){
+  const c = document.createElement('div'); c.className='card';
+  const art = document.createElement('div'); art.className='art';
+  const img = t.album?.images?.[0]?.url; if(img) art.style.backgroundImage = `url("${img}")`;
+  const meta = document.createElement('div'); meta.className='meta';
+  const ti = document.createElement('div'); ti.className='t'; ti.textContent = t.name;
+  const ar = document.createElement('div'); ar.className='a'; ar.textContent = (t.artists||[]).map(a=>a.name).join(', ');
+  meta.append(ti, ar);
+  const y = document.createElement('div'); y.className='stamp yes'; y.textContent='В ПЛЕЙЛИСТ';
+  const n = document.createElement('div'); n.className='stamp no'; n.textContent='МИМО';
+  const sn = document.createElement('div'); sn.className='snip'; sn.innerHTML='<i></i>';
+  c.append(art, meta, y, n, sn);
+  return c;
+}
+function render(){
+  stage.innerHTML='';
+  $('left-count').textContent = queue.length ? `осталось ${queue.length}` : 'всё разобрано';
+  if(!queue.length){
+    const e = document.createElement('div'); e.className='empty';
+    e.innerHTML = '<div><h2>Стопка пуста</h2><p>Все треки разобраны. Можно отменить последнее действие или выбрать другой плейлист.</p></div>';
+    stage.append(e); $('ambient').style.opacity=.2; stopPlayback(); return;
+  }
+  const n = Math.min(3, queue.length);
+  for(let i=n-1;i>=0;i--){
+    const c = makeCard(queue[i]);
+    c.style.transform = `translateY(${i*12}px) scale(${1-i*0.05})`;
+    c.style.zIndex = 10-i;
+    if(i===0){ c.classList.add('top-card'); attachSwipe(c); }
+    stage.append(c);
+  }
+  const img = queue[0].album?.images?.[0]?.url;
+  if(img){ $('ambient').style.backgroundImage=`url("${img}")`; $('ambient').style.opacity=.45; }
+  schedulePlay();
+}
+function attachSwipe(card){
+  let sx=0, sy=0, dx=0, drag=false;
+  const yes=card.querySelector('.stamp.yes'), no=card.querySelector('.stamp.no');
+  card.addEventListener('pointerdown', e=>{ if(busy) return; drag=true; sx=e.clientX; sy=e.clientY; card.setPointerCapture(e.pointerId); card.style.transition='none'; });
+  card.addEventListener('pointermove', e=>{
+    if(!drag) return;
+    dx = e.clientX-sx; const dy = e.clientY-sy;
+    card.style.transform = `translate(${dx}px,${dy*.25}px) rotate(${dx/16}deg)`;
+    yes.style.opacity = Math.max(0, Math.min(1, dx/110));
+    no.style.opacity  = Math.max(0, Math.min(1, -dx/110));
+  });
+  const end = ()=>{
+    if(!drag) return; drag=false;
+    if(Math.abs(dx) > 110){ commit(dx>0?'right':'left'); }
+    else{ card.style.transition='transform .25s'; card.style.transform=''; yes.style.opacity=no.style.opacity=0; }
+    dx=0;
+  };
+  card.addEventListener('pointerup', end);
+  card.addEventListener('pointercancel', end);
+}
+function commit(dir){
+  if(busy || !queue.length) return; busy=true;
+  const card = stage.querySelector('.top-card'), t = queue[0];
+  card.style.transition = 'transform .32s ease-in, opacity .32s';
+  card.style.transform = `translate(${dir==='right'?'':'-'}${innerWidth*1.2}px,-40px) rotate(${dir==='right'?25:-25}deg)`;
+  card.style.opacity = 0;
+  cancelTimers();
+  setTimeout(()=>{
+    queue.shift(); history_.push({t, dir});
+    if(dir==='right') addToPlaylist(t); else dismissTrack(t);
+    busy=false; render();
+  }, 300);
+}
+function dismissTrack(t){ dismissed.add(t.uri); LS.set('ss_dismissed', [...dismissed]); }
+async function addToPlaylist(t){
+  try{
+    await api(`/playlists/${target.id}/items`, {method:'POST', body:{uris:[t.uri]}});
+    const a = new Set(LS.get(addedKey(target.id), [])); a.add(t.uri); LS.set(addedKey(target.id), [...a]);
+  }catch(e){
+    toast(`Не добавилось: «${t.name}» — ${e.message}`);
+    history_ = history_.filter(h=>h.t!==t); queue.unshift(t); render();
+  }
+}
+async function undo(){
+  if(busy || !history_.length) { toast('Отменять пока нечего'); return; }
+  const {t, dir} = history_.pop();
+  if(dir==='left'){ dismissed.delete(t.uri); LS.set('ss_dismissed', [...dismissed]); }
+  else{
+    try{
+      await api(`/playlists/${target.id}/items`, {method:'DELETE', body:{items:[{uri:t.uri}]}});
+      const a = new Set(LS.get(addedKey(target.id), [])); a.delete(t.uri); LS.set(addedKey(target.id), [...a]);
+    }catch(e){ toast('Не удалось убрать из плейлиста: '+e.message); history_.push({t,dir}); return; }
+  }
+  queue.unshift(t); render();
+}
+
+/* ================= Запуск ================= */
+async function startDeck(){
+  $('start-btn').disabled = true;
+  initPlayer();                      // по клику — иначе браузер заблокирует звук
+  await buildQueue();
+  $('pl-name').textContent = target.name;
+  show('deck-screen'); render();
+  $('start-btn').disabled = false;
+}
+async function boot(){
+  $('cid').value = LS.get('ss_cid','') ;
+  $('redir').textContent = REDIRECT;
+  $('login-btn').onclick = login;
+  $('logout1').onclick = logout;
+  $('newbtn').onclick = createPlaylist;
+  $('start-btn').onclick = startDeck;
+  $('change-pl').onclick = ()=>{ stopPlayback(); show('pick-screen'); };
+  $('mute-btn').onclick = toggleMute;
+  $('dev-btn').onclick = ()=>pickDevice(false);
+  $('status').onclick = ()=>{ if(!deviceId && connectMode) pickDevice(false); else schedulePlay(); };
+  $('dev-refresh').onclick = ()=>pickDevice(false);
+  $('dev-close').onclick = closeDevices;
+  $('b-yes').onclick = ()=>commit('right');
+  $('b-no').onclick = ()=>commit('left');
+  $('b-undo').onclick = undo;
+  addEventListener('keydown', e=>{
+    if(!$('deck-screen').classList.contains('active') || e.target.tagName==='INPUT') return;
+    if(e.key==='ArrowRight') commit('right');
+    else if(e.key==='ArrowLeft') commit('left');
+    else if(e.key==='Backspace') undo();
+  });
+
+  try{ await handleRedirect(); }catch(e){ toast('Не удалось завершить вход: '+e.message); }
+  if(!LS.get('ss_tokens')){ show('login-screen'); return; }
+
+  show('pick-screen');
+  try{
+    me = await api('/me');
+    await loadPlaylists();
+    const last = LS.get('ss_target'); const p = playlists.find(x=>x.id===last); if(p) selectPlaylist(p);
+    await loadLiked();
+  }catch(e){
+    if(e.message==='no-auth' || e.status===401){ LS.del('ss_tokens'); show('login-screen'); toast('Войдите заново'); }
+    else if(e.status===403){ toast('Нет доступа (403). Проверьте, что ваш аккаунт добавлен в User Management приложения и у владельца приложения есть Premium.'); }
+    else toast('Ошибка: '+e.message);
+  }
+}
+boot();
+</script>
+</body>
+</html>
