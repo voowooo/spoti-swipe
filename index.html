@@ -78,6 +78,8 @@ small{color:var(--muted);line-height:1.5;display:block}
 .progress i{display:block;height:100%;width:0;background:var(--accent);transition:width .2s}
 #dev-ov{position:fixed;inset:0;z-index:20;background:rgba(10,6,16,.82);display:none;align-items:flex-end;justify-content:center}
 #dev-ov .sheet{width:100%;max-width:520px;background:var(--bg);border:1px solid var(--line);border-radius:22px 22px 0 0;padding:22px 18px calc(22px + env(safe-area-inset-bottom));max-height:80vh;overflow:auto}
+.vol{display:flex;align-items:center;gap:10px;justify-content:center;margin-top:14px;color:var(--muted)}
+.vol input{width:min(60vw,240px);accent-color:var(--accent);height:28px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -137,6 +139,7 @@ small{color:var(--muted);line-height:1.5;display:block}
       <button class="rb sm" id="b-undo" aria-label="Отменить">↶</button>
       <button class="rb yes" id="b-yes" aria-label="В плейлист">♥</button>
     </div>
+    <div class="vol"><span>🔈</span><input type="range" id="vol" min="0" max="100" step="1" aria-label="Громкость"><span>🔊</span></div>
     <p class="hint" id="status" style="margin-top:10px;cursor:pointer" title="Нажмите, чтобы запустить заново"></p>
     <p class="hint" style="margin-top:6px">← убрать из стопки · в плейлист → · клавиши ← → и Backspace</p>
   </div>
@@ -306,11 +309,17 @@ async function loadLiked(){
 async function buildQueue(){
   // что уже лежит в плейлисте — в стопку не попадает
   let inPl = new Set(LS.get(addedKey(target.id), []));
+  let fetched = true;
   try{
     const items = await fetchAll(`/playlists/${target.id}/items?limit=50`);
     items.forEach(i=>{ const t=trackFrom(i); if(t) inPl.add(t.uri); });
-  }catch(e){ /* если нет доступа — полагаемся на локальную память */ }
+  }catch(e){ fetched = false; }
+  const already = liked.filter(t=>inPl.has(t.uri)).length;
+  const skipped = liked.filter(t=>dismissed.has(t.uri) && !inPl.has(t.uri)).length;
   queue = liked.filter(t => !dismissed.has(t.uri) && !inPl.has(t.uri));
+  setTimeout(()=>toast(fetched
+    ? `Уже в плейлисте: ${already}, ранее пропущено: ${skipped}. В стопке: ${queue.length}`
+    : 'Не смог прочитать плейлист — скрываю только то, что добавлено через это приложение в этом браузере'), 400);
   if($('shuffle').checked) shuffleArr(queue);
   history_ = [];
 }
@@ -318,6 +327,15 @@ async function buildQueue(){
 /* ================= Воспроизведение ================= */
 const IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
 let connectMode = IOS;   // iOS: SDK не работает, управляем приложением Spotify через Connect
+let volume = Math.min(1, Math.max(0, LS.get('ss_vol', 0.8))), volT;
+function applyVolume(){
+  if(player){ try{ player.setVolume(volume); }catch{} }
+  else if(connectMode && deviceId){
+    clearTimeout(volT);
+    volT = setTimeout(()=>api(`/me/player/volume?volume_percent=${Math.round(volume*100)}&device_id=${deviceId}`, {method:'PUT'})
+      .catch(()=>toast('Громкость этого устройства отсюда менять нельзя (на iPhone — кнопками телефона)')), 200);
+  }
+}
 let player=null, deviceId=null, playToken=0, snipTimer, debTimer, muted=false, sdkFailed=false;
 async function loadDevices(){
   const j = await api('/me/player/devices');
@@ -355,7 +373,7 @@ function initPlayer(){
   if(connectMode){ $('dev-btn').style.display=''; pickDevice(true); return; }
   if(player || sdkFailed) { player && player.activateElement && player.activateElement(); return; }
   window.onSpotifyWebPlaybackSDKReady = () => {
-    player = new Spotify.Player({ name:'Разбор Liked Songs', getOAuthToken: cb=>getToken().then(cb), volume:.8 });
+    player = new Spotify.Player({ name:'Разбор Liked Songs', getOAuthToken: cb=>getToken().then(cb), volume:volume });
     player.addListener('ready', async ({device_id})=>{
       deviceId = device_id;
       try{ await api('/me/player', {method:'PUT', body:{device_ids:[deviceId], play:false}}); }catch{}
@@ -544,6 +562,8 @@ async function boot(){
   $('start-btn').onclick = startDeck;
   $('change-pl').onclick = ()=>{ stopPlayback(); show('pick-screen'); };
   $('mute-btn').onclick = toggleMute;
+  $('vol').value = Math.round(volume*100);
+  $('vol').oninput = e=>{ volume = e.target.value/100; LS.set('ss_vol', volume); applyVolume(); };
   $('dev-btn').onclick = ()=>pickDevice(false);
   $('status').onclick = ()=>{ if(!deviceId && connectMode) pickDevice(false); else schedulePlay(); };
   $('dev-refresh').onclick = ()=>pickDevice(false);
