@@ -90,7 +90,7 @@ small{color:var(--muted);line-height:1.5;display:block}
 <section class="screen" id="login-screen">
   <div class="box">
     <h1>Разбери свои Liked Songs</h1>
-    <p class="lead">Свайп вправо — трек уходит в выбранный плейлист. Свайп влево — трек просто пропадает из этой стопки. В Liked Songs ничего не удаляется.</p>
+    <p class="lead">Свайп вправо — трек отмечен для плейлиста: когда стопка закончится, отмеченные уйдут туда по порядку Liked Songs. Свайп влево — трек пропадает из этой стопки, но запоминается: позже можно продолжить с места остановки. В Liked Songs ничего не удаляется.</p>
     <label for="cid">Client ID вашего приложения Spotify</label>
     <input type="text" id="cid" placeholder="например, 3f2a…" autocomplete="off" spellcheck="false">
     <label>Redirect URI — добавьте его в настройках приложения на developer.spotify.com</label>
@@ -104,7 +104,7 @@ small{color:var(--muted);line-height:1.5;display:block}
 <section class="screen" id="pick-screen">
   <div class="box">
     <h1>Куда складывать?</h1>
-    <p class="lead">Выберите плейлист из вашей библиотеки или создайте новый.</p>
+    <p class="lead">Выберите плейлист из вашей библиотеки или создайте новый. Отмеченные сердцем треки попадут туда по порядку Liked Songs — в конце разбора. Прогресс сохраняется: пропущенные не вернутся, а стопку можно продолжить с места остановки.</p>
     <div id="pl-list"></div>
     <div class="newpl">
       <input type="text" id="newname" placeholder="Название нового плейлиста">
@@ -129,6 +129,7 @@ small{color:var(--muted);line-height:1.5;display:block}
     <div class="row">
       <button class="btn ghost" id="dev-btn" title="Устройство воспроизведения" style="display:none">📱</button>
       <button class="btn ghost" id="mute-btn" title="Звук">🔊</button>
+      <button class="btn ghost" id="reshuffle" title="Перемешать стопку заново">🔀</button>
       <button class="btn ghost" id="change-pl">Плейлист</button>
     </div>
   </div>
@@ -141,7 +142,7 @@ small{color:var(--muted);line-height:1.5;display:block}
     </div>
     <div class="vol"><span>🔈</span><input type="range" id="vol" min="0" max="100" step="1" aria-label="Громкость"><span>🔊</span></div>
     <p class="hint" id="status" style="margin-top:10px;cursor:pointer" title="Нажмите, чтобы запустить заново"></p>
-    <p class="hint" style="margin-top:6px">← убрать из стопки · в плейлист → · клавиши ← → и Backspace</p>
+    <p class="hint" style="margin-top:6px">← убрать из стопки · в плейлист → (по порядку Liked Songs, когда стопка пуста) · клавиши ← → и Backspace</p>
   </div>
 </section>
 
@@ -257,6 +258,10 @@ async function fetchAll(firstUrl, onPage){
 let me, playlists=[], target=null, liked=[], queue=[], history_=[];
 let dismissed = new Set(LS.get('ss_dismissed', []));
 const addedKey = id => 'ss_added_'+id;
+const pendingKey = id => 'ss_pending_'+id;
+const stackKey = id => 'ss_stack_'+id;   // порядок стопки этого плейлиста — чтобы продолжить с места остановки
+// треки, свайпнуты вправо: сначала копим, в плейлист добавляем пачкой — по порядку Liked Songs
+let kept=[], keptPid=null, flushing=false;
 
 function trackFrom(it){
   const t = it && (it.track || it.item || it);
@@ -307,6 +312,7 @@ async function loadLiked(){
   $('start-btn').disabled = !target;
 }
 async function buildQueue(){
+  const flushedOk = await flushKept(true);   // дописываем отложенное — в порядке Liked Songs
   // что уже лежит в плейлисте — в стопку не попадает
   let inPl = new Set(LS.get(addedKey(target.id), []));
   let fetched = true;
@@ -314,14 +320,61 @@ async function buildQueue(){
     const items = await fetchAll(`/playlists/${target.id}/items?limit=50`);
     items.forEach(i=>{ const t=trackFrom(i); if(t) inPl.add(t.uri); });
   }catch(e){ fetched = false; }
+  kept.forEach(u=>inPl.add(u));   // уже отложенное (если добавить не вышло) повторно не показываю
   const already = liked.filter(t=>inPl.has(t.uri)).length;
   const skipped = liked.filter(t=>dismissed.has(t.uri) && !inPl.has(t.uri)).length;
-  queue = liked.filter(t => !dismissed.has(t.uri) && !inPl.has(t.uri));
+  const remaining = liked.filter(t => !dismissed.has(t.uri) && !inPl.has(t.uri));
+  // продолжаю с места остановки: вспоминаю порядок стопки этого плейлиста
+  const saved = LS.get(stackKey(target.id), null);
+  const used = new Set(); queue = []; let restored = 0;
+  if(Array.isArray(saved) && saved.length){
+    const byUri = new Map(remaining.map(t=>[t.uri,t]));
+    saved.forEach(u=>{ const t=byUri.get(u); if(t){ queue.push(t); used.add(u); restored++; } });
+    remaining.forEach(t=>{ if(!used.has(t.uri)) queue.push(t); });   // залайканные позже — в конец
+  }
+  if(!restored){ queue = remaining.slice(); if($('shuffle').checked) shuffleArr(queue); }
+  saveStack();
   setTimeout(()=>toast(fetched
-    ? `Уже в плейлисте: ${already}, ранее пропущено: ${skipped}. В стопке: ${queue.length}`
-    : 'Не смог прочитать плейлист — скрываю только то, что добавлено через это приложение в этом браузере'), 400);
-  if($('shuffle').checked) shuffleArr(queue);
+    ? `${restored?'Продолжаю с места остановки. ':''}Уже в плейлисте: ${already}, ранее пропущено: ${skipped}. В стопке: ${queue.length}`
+    : 'Не смог прочитать плейлист — скрываю только то, что добавлено через это приложение в этом браузере'), flushedOk ? 400 : 3500);
   history_ = [];
+}
+function saveStack(){ if(target) LS.set(stackKey(target.id), queue.map(t=>t.uri)); }
+
+/* Отложенное добавление: в плейлист уходит пачкой и строго по порядку Liked Songs */
+function syncKept(){
+  const id = target && target.id;
+  if(keptPid !== id){ keptPid = id; kept = id ? LS.get(pendingKey(id), []) : []; }
+}
+function saveKept(){ if(keptPid) LS.set(pendingKey(keptPid), kept); }
+async function flushKept(quiet){
+  if(flushing) return true;
+  syncKept();
+  if(!kept.length) return true;
+  flushing = true;
+  try{
+    const order = new Map(); liked.forEach((t,i)=>order.set(t.uri,i));
+    let done = 0;
+    while(kept.length){
+      kept.sort((a,b)=>(order.has(a)?order.get(a):1e9)-(order.has(b)?order.get(b):1e9));  // на случай новых свайпов во время добавления
+      const chunk = kept.slice(0,100);   // Spotify принимает не больше 100 uri за раз
+      setStatus(`добавляю в плейлист: ${done} из ${done+kept.length}`);
+      await api(`/playlists/${target.id}/items`, {method:'POST', body:{uris:chunk}});
+      kept.splice(0, chunk.length); saveKept();
+      const a = new Set(LS.get(addedKey(target.id), []));
+      chunk.forEach(u=>a.add(u)); LS.set(addedKey(target.id), [...a]);
+      done += chunk.length;
+    }
+    LS.del(pendingKey(target.id));
+    if(done && !quiet) toast(`Добавлено треков: ${done} — по порядку Liked Songs`);
+    return true;
+  }catch(e){
+    toast(`Не добавилось ${kept.length} треков: ${e.message}. Они сохранены — добавлю при следующем входе в стопку.`);
+    return false;
+  }finally{
+    flushing=false; setStatus('');
+    if(!queue.length && $('deck-screen').classList.contains('active')) render();
+  }
 }
 
 /* ================= Воспроизведение ================= */
@@ -473,7 +526,11 @@ function render(){
   $('left-count').textContent = queue.length ? `осталось ${queue.length}` : 'всё разобрано';
   if(!queue.length){
     const e = document.createElement('div'); e.className='empty';
-    e.innerHTML = '<div><h2>Стопка пуста</h2><p>Все треки разобраны. Можно отменить последнее действие или выбрать другой плейлист.</p></div>';
+    const head = flushing ? 'Отправляю в плейлист…' : 'Стопка пуста';
+    const body = flushing ? 'Отмеченные треки уходят в плейлист по порядку Liked Songs.'
+      : kept.length ? `Не удалось добавить ${kept.length} треков. Они сохранены — нажмите «Плейлист», чтобы повторить.`
+      : 'Все треки разобраны. Можно отменить последнее действие или выбрать другой плейлист.';
+    e.innerHTML = `<div><h2>${head}</h2><p>${body}</p></div>`;
     stage.append(e); $('ambient').style.opacity=.2; stopPlayback(); return;
   }
   const n = Math.min(3, queue.length);
@@ -518,28 +575,33 @@ function commit(dir){
   setTimeout(()=>{
     queue.shift(); history_.push({t, dir});
     if(dir==='right') addToPlaylist(t); else dismissTrack(t);
-    busy=false; render();
+    busy=false;
+    if(!queue.length && kept.length) flushKept();   // стопка пуста — отправляю пачкой
+    render();
   }, 300);
 }
 function dismissTrack(t){ dismissed.add(t.uri); LS.set('ss_dismissed', [...dismissed]); }
-async function addToPlaylist(t){
-  try{
-    await api(`/playlists/${target.id}/items`, {method:'POST', body:{uris:[t.uri]}});
-    const a = new Set(LS.get(addedKey(target.id), [])); a.add(t.uri); LS.set(addedKey(target.id), [...a]);
-  }catch(e){
-    toast(`Не добавилось: «${t.name}» — ${e.message}`);
-    history_ = history_.filter(h=>h.t!==t); queue.unshift(t); render();
-  }
+function addToPlaylist(t){
+  // копим: в плейлист уйдёт пачкой, когда стопка закончится (или при выходе из неё)
+  syncKept();
+  if(!kept.includes(t.uri)){ kept.push(t.uri); saveKept(); }
 }
 async function undo(){
-  if(busy || !history_.length) { toast('Отменять пока нечего'); return; }
+  if(busy){ toast('Отменять пока нечего'); return; }
+  if(flushing){ toast('Идёт добавление в плейлист — подождите секунду'); return; }
+  if(!history_.length){ toast('Отменять пока нечего'); return; }
   const {t, dir} = history_.pop();
   if(dir==='left'){ dismissed.delete(t.uri); LS.set('ss_dismissed', [...dismissed]); }
   else{
-    try{
-      await api(`/playlists/${target.id}/items`, {method:'DELETE', body:{items:[{uri:t.uri}]}});
-      const a = new Set(LS.get(addedKey(target.id), [])); a.delete(t.uri); LS.set(addedKey(target.id), [...a]);
-    }catch(e){ toast('Не удалось убрать из плейлиста: '+e.message); history_.push({t,dir}); return; }
+    syncKept();
+    const i = kept.indexOf(t.uri);
+    if(i>=0){ kept.splice(i,1); saveKept(); }   // ещё не добавлен — просто убираю из отложенного
+    else{
+      try{
+        await api(`/playlists/${target.id}/items`, {method:'DELETE', body:{items:[{uri:t.uri}]}});
+        const a = new Set(LS.get(addedKey(target.id), [])); a.delete(t.uri); LS.set(addedKey(target.id), [...a]);
+      }catch(e){ toast('Не удалось убрать из плейлиста: '+e.message); history_.push({t,dir}); return; }
+    }
   }
   queue.unshift(t); render();
 }
@@ -560,8 +622,17 @@ async function boot(){
   $('logout1').onclick = logout;
   $('newbtn').onclick = createPlaylist;
   $('start-btn').onclick = startDeck;
-  $('change-pl').onclick = ()=>{ stopPlayback(); show('pick-screen'); };
+  $('change-pl').onclick = async ()=>{
+    if(busy) return;
+    stopPlayback();
+    await flushKept();           // выход из стопки — дописываю отложенное
+    show('pick-screen');
+  };
   $('mute-btn').onclick = toggleMute;
+  $('reshuffle').onclick = ()=>{
+    if(busy || flushing || !queue.length){ toast('Перемешивать пока нечего'); return; }
+    shuffleArr(queue); saveStack(); render(); toast('Стопка перемешана — порядок запомнен');
+  };
   $('vol').value = Math.round(volume*100);
   $('vol').oninput = e=>{ volume = e.target.value/100; LS.set('ss_vol', volume); applyVolume(); };
   $('dev-btn').onclick = ()=>pickDevice(false);
